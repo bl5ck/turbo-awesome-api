@@ -1,0 +1,10 @@
+{
+  "name": "turbo-awesome-cli",
+  "version": "0.0.1-alpha.0",
+  "description": "Cli wrapper for turbo resolver",
+  "main": "index.js",
+  "repository": "https://github.com/bl5ck/turbo-awesome-api.git",
+  "author": "Steve",
+  "license": "MIT",
+  "private": false
+}
