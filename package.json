@@ -8,6 +8,7 @@
   "license": "MIT",
   "private": false,
   "dependencies": {
+    "cross-spawn": "^6.0.5",
     "del": "^3.0.0",
     "fs-extra": "^7.0.0",
     "isomorphic-fetch": "^2.2.1",

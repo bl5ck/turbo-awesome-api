@@ -1,12 +1,20 @@
-const { log, finalizeArgs, execSteps } = require('jsuti');
+const { log, finalizeArgs, execStep } = require('jsuti');
 const fs = require('fs-extra');
 const del = require('del');
 const { Resolver, NpmHttpRegistry } = require('./core/turbo-resolver');
 const fetch = require('isomorphic-fetch');
 const path = require('path');
-const { spawn } = require('child_process');
+const spawn = require('cross-spawn');
 const prettyMs = require('pretty-ms');
 const startTime = new Date().getTime();
+const split = (array, chunk = 4) => {
+  let i, j, temparray;
+  const result = [];
+  for (i = 0, j = array.length; i < j; i += chunk) {
+    temparray = array.slice(i, i + chunk);
+    result.push(temparray);
+  }
+};
 // configs
 /**
  * final args object
@@ -22,6 +30,13 @@ const possibleArgs = [
     arg: 'install',
     abbr: 'i',
     default: undefined
+  },
+  // development mode
+  {
+    name: 'dev',
+    arg: '--dev',
+    abbr: '-d',
+    default: false
   }
 ];
 /**
@@ -31,9 +46,16 @@ const STEPS = {
   PREPARE: 'Prepare',
   INSTALL: 'Install'
 };
-const PATHS = {
-  DIR: process.cwd()
-};
+const PATHS = (() => {
+  const DIR = process.cwd();
+  const PACKAGE = path.join(DIR, 'package.json');
+  const PACKAGE_BACKUP = `${PACKAGE}.bk`;
+  return {
+    DIR,
+    PACKAGE,
+    PACKAGE_BACKUP
+  };
+})();
 /**
  * run steps
  */
@@ -43,60 +65,36 @@ const runSteps = [
     name: STEPS.PREPARE,
     exec: (args, step) => {
       finalizeArgs(args, possibleArgs);
+      args.dev = args.dev && args.dev !== 'false';
     }
   },
   // install
   {
     name: STEPS.INSTALL,
     childProcesses: [STEPS.PREPARE],
-    exec: (args, step) => {},
-    undo: (args, step) => {}
-  }
-];
+    exec: async (args, step) => {
+      let packageJson;
+      try {
+        packageJson = require(PATHS.PACKAGE);
+      } catch (e) {
+        throw new Error('Executing directory must have a package.json file.');
+      }
 
-let [, , action] = process.argv;
-if (!action) {
-  action = 'install';
-} else if (!STEPS[action.toUpperCase()]) {
-  const actionArg = possibleArgs.find(
-    ({ arg, abbr }) => action === arg || action === abbr
-  );
-  if (!actionArg) {
-    throw new Error(`Action "${action}" is invalid!`);
-    process.exit(1);
-  }
-  action = actionArg.name;
-}
+      let dependencies = {
+        ...packageJson.dependencies,
+        ...(packageJson.peerDependencies || {})
+      };
 
-action = STEPS[action.toUpperCase()];
-const step = runSteps.find(({ name }) => name === action);
-
-const resolve = dependencies => {
-  // const resolver = new Resolver(); // For server-side usage, uses https://registry.npmjs.org which doesn't have CORS enabled
-
-  const resolver = new Resolver({
-    registry: new NpmHttpRegistry({
-      registryUrl: 'https://registry.npmjs.org/'
-    })
-  });
-
-  return resolver.resolve(dependencies);
-};
-const project = {
-  vendorFiles: {},
-  dirCache: {}
-};
-const createdPaths = {};
-let packageJson;
-try {
-  packageJson = require(path.join(PATHS.DIR, 'package.json'));
-} catch (e) {
-  throw new Error('Executing directory must have a package.json file.');
-}
-resolve(packageJson.dependencies)
-  .then(
-    ({ appDependencies, resDependencies }) => {
-      return Promise.all(
+      const resolver = new Resolver({
+        registry: new NpmHttpRegistry({
+          registryUrl: 'https://registry.npmjs.org/'
+        }),
+        timeout: 30000
+      });
+      const { appDependencies, resDependencies } = await resolver.resolve(
+        dependencies
+      );
+      await Promise.all(
         Object.keys(appDependencies).map(pkg => {
           const { version, dependencies, main } = appDependencies[pkg];
           log(`<grey Fetching ${pkg}@${version}... />`).write();
@@ -137,13 +135,49 @@ resolve(packageJson.dependencies)
             });
         })
       );
+      if (args.dev) {
+        await fs.move(PATHS.PACKAGE, PATHS.PACKAGE_BACKUP);
+        const { dependencies, peerDependencies, ...res } = packageJson;
+        fs.writeFileSync(PATHS.PACKAGE, JSON.stringify(res));
+        spawn.sync('yarn', {
+          cwd: PATHS.DIR,
+          stdio: 'inherit'
+        });
+        fs.unlinkSync(PATHS.PACKAGE);
+        await fs.move(PATHS.PACKAGE_BACKUP, PATHS.PACKAGE);
+      }
+      const doneTime = new Date().getTime() - startTime;
+      log(`<green Done in ${prettyMs(doneTime)}/>`).write();
     },
-    err => {
-      log(`<red ${JSON.stringify(err, null, 2)} />`).write();
+    undo: async (args, step) => {
+      if (args.dev) {
+        fs.unlinkSync(PATHS.PACKAGE);
+        await fs.move(PATHS.PACKAGE_BACKUP, PATHS.PACKAGE);
+      }
     }
-  )
-  .then(files => {
-    // console.log(files);
-    const doneTime = new Date().getTime() - startTime;
-    log(`<green Done in ${prettyMs(doneTime)}/>`).write();
-  });
+  }
+];
+
+let [, , action, ...res] = process.argv;
+if (!action || (action.startsWith('-') && !res[1])) {
+  action = 'install';
+} else if (!STEPS[action.toUpperCase()]) {
+  const actionArg = possibleArgs.find(
+    ({ arg, abbr }) => action === arg || action === abbr
+  );
+  if (!actionArg) {
+    throw new Error(`Action "${action}" is invalid!`);
+    process.exit(1);
+  }
+  action = actionArg.name;
+}
+
+action = STEPS[action.toUpperCase()];
+const step = runSteps.find(({ name }) => name === action);
+const project = {
+  vendorFiles: {},
+  dirCache: {}
+};
+const createdPaths = {};
+
+execStep(cliArgs, step, runSteps.indexOf(step), runSteps);
