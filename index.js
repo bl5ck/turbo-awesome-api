@@ -4,7 +4,9 @@ const del = require('del');
 const { Resolver, NpmHttpRegistry } = require('./core/turbo-resolver');
 const fetch = require('isomorphic-fetch');
 const path = require('path');
-
+const { spawn } = require('child_process');
+const prettyMs = require('pretty-ms');
+const startTime = new Date().getTime();
 // configs
 /**
  * final args object
@@ -29,8 +31,11 @@ const STEPS = {
   PREPARE: 'Prepare',
   INSTALL: 'Install'
 };
+const PATHS = {
+  DIR: process.cwd()
+};
 /**
- * eject steps
+ * run steps
  */
 const runSteps = [
   // prepare
@@ -82,44 +87,63 @@ const project = {
   dirCache: {}
 };
 const createdPaths = {};
-resolve({
-  rxjs: '~5.5.0'
-})
-  .then(({ appDependencies, resDependencies }) => {
-    return Promise.all(
-      Object.keys(appDependencies).map(pkg => {
-        const { version, dependencies, main } = appDependencies[pkg];
-        return fetch(`https://t.staticblitz.com/v4/${pkg}@${version}`)
-          .then(res => res.json())
-          .then(({ dirCache, vendorFiles }) => {
-            project.dirCache[`${pkg}@${version}`] =
-              dirCache[`${pkg}@${version}`];
-            return Promise.all(
-              Object.keys(vendorFiles).map(file => {
-                const url = `https://unpkg.com${file}`;
-                project.vendorFiles[url] = {
-                  fullPath: url,
-                  content: vendorFiles[file]
-                };
-                const folder = path.dirname(file).replace(`@${version}`, '');
-                const fileFolder = path.join(
-                  process.cwd(),
-                  'node_modules',
-                  folder
-                );
-                if (!createdPaths[folder]) {
-                  createdPaths[folder] = fs.ensureDir(fileFolder);
-                }
-                return createdPaths[folder].then(() => {
-                  // TODO: write file content
-                  // fs.writeFileSync(path.join(fileFolder, ));
-                });
-              })
-            );
-          });
-      })
-    );
-  })
-  .then(project => {
-    console.log(project);
+let packageJson;
+try {
+  packageJson = require(path.join(PATHS.DIR, 'package.json'));
+} catch (e) {
+  throw new Error('Executing directory must have a package.json file.');
+}
+resolve(packageJson.dependencies)
+  .then(
+    ({ appDependencies, resDependencies }) => {
+      return Promise.all(
+        Object.keys(appDependencies).map(pkg => {
+          const { version, dependencies, main } = appDependencies[pkg];
+          log(`<grey Fetching ${pkg}@${version}... />`).write();
+          return fetch(`https://t.staticblitz.com/v4/${pkg}@${version}`)
+            .then(res => res.json())
+            .then(({ dirCache, vendorFiles }) => {
+              const fullPkgName = `${pkg}@${version}`;
+              project.dirCache[fullPkgName] = dirCache[fullPkgName];
+              return Promise.all(
+                Object.keys(vendorFiles).map(file => {
+                  const url = `https://unpkg.com${file}`;
+                  const content = vendorFiles[file];
+                  project.vendorFiles[url] = {
+                    fullPath: url,
+                    content
+                  };
+                  const dirName = path.dirname(file);
+                  const folder = dirName.replace(fullPkgName, pkg);
+                  const fileFolder = path.join(
+                    PATHS.DIR,
+                    'node_modules',
+                    folder
+                  );
+                  if (!createdPaths[folder]) {
+                    createdPaths[folder] = fs.ensureDir(fileFolder);
+                  }
+                  return createdPaths[folder].then(() => {
+                    const filePath = path.join(
+                      fileFolder,
+                      file.replace(dirName, '')
+                    );
+                    log(`<grey Writting ${filePath}... />`).write();
+                    fs.writeFileSync(filePath, content);
+                    return filePath;
+                  });
+                })
+              );
+            });
+        })
+      );
+    },
+    err => {
+      log(`<red ${JSON.stringify(err, null, 2)} />`).write();
+    }
+  )
+  .then(files => {
+    // console.log(files);
+    const doneTime = new Date().getTime() - startTime;
+    log(`<green Done in ${prettyMs(doneTime)}/>`).write();
   });
