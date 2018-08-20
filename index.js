@@ -1,3 +1,4 @@
+// @flow
 const { log, finalizeArgs, execStep } = require('jsuti');
 const fs = require('fs-extra');
 const del = require('del');
@@ -94,46 +95,38 @@ const runSteps = [
       const { appDependencies, resDependencies } = await resolver.resolve(
         dependencies
       );
+      const resolveAppDependencies = async pkg => {
+        const { version, dependencies, main } = appDependencies[pkg];
+        log(`<grey Fetching ${pkg}@${version}... />`).write();
+        const res = await fetch(
+          `https://t.staticblitz.com/v4/${pkg}@${version}`
+        );
+        const { dirCache, vendorFiles } = await res.json();
+        const fullPkgName = `${pkg}@${version}`;
+        project.dirCache[fullPkgName] = dirCache[fullPkgName];
+        const writeVendorFiles = async file => {
+          const url = `https://unpkg.com${file}`;
+          const content = vendorFiles[file];
+          project.vendorFiles[url] = {
+            fullPath: url,
+            content
+          };
+          const dirName = path.dirname(file);
+          const folder = dirName.replace(fullPkgName, pkg);
+          const fileFolder = path.join(PATHS.DIR, 'node_modules', folder);
+          if (!createdPaths[folder]) {
+            createdPaths[folder] = fs.ensureDir(fileFolder);
+          }
+          await createdPaths[folder];
+          const filePath = path.join(fileFolder, file.replace(dirName, ''));
+          log(`<grey Writting ${filePath}... />`).write();
+          fs.writeFileSync(filePath, content);
+          return filePath;
+        };
+        return Promise.all(Object.keys(vendorFiles).map(writeVendorFiles));
+      };
       await Promise.all(
-        Object.keys(appDependencies).map(pkg => {
-          const { version, dependencies, main } = appDependencies[pkg];
-          log(`<grey Fetching ${pkg}@${version}... />`).write();
-          return fetch(`https://t.staticblitz.com/v4/${pkg}@${version}`)
-            .then(res => res.json())
-            .then(({ dirCache, vendorFiles }) => {
-              const fullPkgName = `${pkg}@${version}`;
-              project.dirCache[fullPkgName] = dirCache[fullPkgName];
-              return Promise.all(
-                Object.keys(vendorFiles).map(file => {
-                  const url = `https://unpkg.com${file}`;
-                  const content = vendorFiles[file];
-                  project.vendorFiles[url] = {
-                    fullPath: url,
-                    content
-                  };
-                  const dirName = path.dirname(file);
-                  const folder = dirName.replace(fullPkgName, pkg);
-                  const fileFolder = path.join(
-                    PATHS.DIR,
-                    'node_modules',
-                    folder
-                  );
-                  if (!createdPaths[folder]) {
-                    createdPaths[folder] = fs.ensureDir(fileFolder);
-                  }
-                  return createdPaths[folder].then(() => {
-                    const filePath = path.join(
-                      fileFolder,
-                      file.replace(dirName, '')
-                    );
-                    log(`<grey Writting ${filePath}... />`).write();
-                    fs.writeFileSync(filePath, content);
-                    return filePath;
-                  });
-                })
-              );
-            });
-        })
+        Object.keys(appDependencies).map(resolveAppDependencies)
       );
       if (args.dev) {
         await fs.move(PATHS.PACKAGE, PATHS.PACKAGE_BACKUP);
@@ -148,6 +141,79 @@ const runSteps = [
       }
       const doneTime = new Date().getTime() - startTime;
       log(`<green Done in ${prettyMs(doneTime)}/>`).write();
+    },
+    retry: async (error, args, step) => {
+      if (
+        !error ||
+        !error.error ||
+        error.error !== 'MISSING_PEERS' ||
+        !error.data
+      ) {
+        return false;
+      }
+      const stdin = process.openStdin();
+      log(
+        '<yellow The package.json file is missing bellow peer dependencies:/>'
+      );
+      const missedDependencies = {};
+      Object.keys(error.data).forEach(package => {
+        const versionInfo = error.data[package];
+        const required = Object.keys(versionInfo)[0];
+        log(
+          `<white "${required}" requires ${package}@${
+            versionInfo[required]
+          } to run./>`
+        );
+        missedDependencies[package] = versionInfo[required];
+      });
+      log(
+        "<green Don't worry, we will add them to dependencies automatically for you./>"
+      );
+      log('<green Do you want to continue?(Y/N) Default is "Y" />').write();
+      const answer = await new Promise(done => {
+        stdin.addListener('data', answer => {
+          done(
+            answer
+              .toString()
+              .trim()
+              .toLowerCase()
+          );
+        });
+      });
+      process.stdin.pause();
+      switch (answer) {
+        case 'y':
+        default: {
+          // fix peerDependencies
+          const { peerDependencies, ...res } = require(PATHS.PACKAGE);
+          await fs.move(PATHS.PACKAGE, PATHS.PACKAGE_BACKUP);
+          fs.writeFileSync(
+            PATHS.PACKAGE,
+            JSON.stringify(
+              {
+                ...res,
+                peerDependencies: {
+                  ...(peerDependencies || {}),
+                  ...missedDependencies
+                }
+              },
+              null,
+              2
+            )
+          );
+          // clear import cache of package.json
+          delete require.cache[require.resolve(PATHS.PACKAGE)];
+          // retry
+          await step.exec(args, step);
+          // remove backup file
+          fs.unlinkSync(PATHS.PACKAGE_BACKUP);
+          return true;
+        }
+        case 'n': {
+          log('<grey You chose to do it manually./>').write();
+          return false;
+        }
+      }
     },
     undo: async (args, step) => {
       if (args.dev) {
@@ -167,7 +233,6 @@ if (!action || (action.startsWith('-') && !res[1])) {
   );
   if (!actionArg) {
     throw new Error(`Action "${action}" is invalid!`);
-    process.exit(1);
   }
   action = actionArg.name;
 }

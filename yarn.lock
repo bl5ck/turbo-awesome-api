@@ -101,6 +101,10 @@ escape-string-regexp@^1.0.5:
   version "1.0.5"
   resolved "https://registry.yarnpkg.com/escape-string-regexp/-/escape-string-regexp-1.0.5.tgz#1b61c0562190a8dff6ae3bb2cf0200ca130b86d4"
 
+flow-bin@0.78.0:
+  version "0.78.0"
+  resolved "https://registry.yarnpkg.com/flow-bin/-/flow-bin-0.78.0.tgz#df9fe7f9c9a2dfaff39083949fe2d831b41627b7"
+
 fs-extra@^7.0.0:
   version "7.0.0"
   resolved "https://registry.yarnpkg.com/fs-extra/-/fs-extra-7.0.0.tgz#8cc3f47ce07ef7b3593a11b9fb245f7e34c041d6"
@@ -196,9 +200,9 @@ jsonfile@^4.0.0:
   optionalDependencies:
     graceful-fs "^4.1.6"
 
-jsuti@^0.0.1-alpha.27:
-  version "0.0.1-alpha.27"
-  resolved "https://registry.yarnpkg.com/jsuti/-/jsuti-0.0.1-alpha.27.tgz#3700cdd718ced3472e09ffbe43745fce51e1fce9"
+jsuti@^0.0.1-alpha.29:
+  version "0.0.1-alpha.29"
+  resolved "https://registry.yarnpkg.com/jsuti/-/jsuti-0.0.1-alpha.29.tgz#8fc2a325b11390b5edca95c29f506f176287f8f5"
   dependencies:
     babel-polyfill "^6.26.0"
     babel-runtime "~6.26.0"
