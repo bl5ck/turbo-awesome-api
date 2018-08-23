@@ -10,6 +10,23 @@
       "name": "Launch Program",
       "program": "${workspaceFolder}\\index.js",
       "cwd": "${workspaceFolder}\\tmp",
+      "args": ["-s", "true"],
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Single Thread Program",
+      "program": "${workspaceFolder}\\index.st.js",
+      "cwd": "${workspaceFolder}\\tmp",
+      "args": ["-s", "true"],
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Fork",
+      "program": "${workspaceFolder}\\fork.js",
       "console": "integratedTerminal"
     }
   ]

@@ -6,10 +6,8 @@ const { Resolver, NpmHttpRegistry } = require('./core/turbo-resolver');
 const fetch = require('isomorphic-fetch');
 const path = require('path');
 const spawn = require('cross-spawn');
-const fork = require('./fork');
 const prettyMs = require('pretty-ms');
 const startTime = new Date().getTime();
-
 const split = (array, chunk = 4) => {
   let i, j, temparray;
   const result = [];
@@ -17,9 +15,7 @@ const split = (array, chunk = 4) => {
     temparray = array.slice(i, i + chunk);
     result.push(temparray);
   }
-  return result;
 };
-
 // configs
 /**
  * final args object
@@ -106,79 +102,38 @@ const runSteps = [
       const { appDependencies, resDependencies } = await resolver.resolve(
         dependencies
       );
-      const resolveAppDependencies = pkgs => {
-        return fork(
-          (pkgs, appDependencies, project, createdPaths, PATHS) => {
-            console.log(pkgs);
-            return Promise.all(
-              pkgs.map(async pkg => {
-                const { version, dependencies, main } = appDependencies[pkg];
-                log(`<grey Fetching ${pkg}@${version}... />`).write();
-                const res = await fetch(
-                  `https://t.staticblitz.com/v4/${pkg}@${version}`
-                );
-                const { dirCache, vendorFiles } = await res.json();
-                const fullPkgName = `${pkg}@${version}`;
-                project.dirCache[fullPkgName] = dirCache[fullPkgName];
-                const writeVendorFiles = async file => {
-                  const url = `https://unpkg.com${file}`;
-                  const content = vendorFiles[file];
-                  project.vendorFiles[url] = {
-                    fullPath: url,
-                    content
-                  };
-                  const dirName = path.dirname(file);
-                  const folder = dirName.replace(fullPkgName, pkg);
-                  const fileFolder = path.join(
-                    PATHS.DIR,
-                    'node_modules',
-                    folder
-                  );
-                  if (!createdPaths[folder]) {
-                    createdPaths[folder] = fs.ensureDir(fileFolder);
-                  }
-                  await createdPaths[folder];
-                  const filePath = path.join(
-                    fileFolder,
-                    file.replace(dirName, '')
-                  );
-                  log(`<grey Writting ${filePath}... />`).write();
-                  await fs.writeFile(filePath, content);
-                  return filePath;
-                };
-                return Promise.all(
-                  Object.keys(vendorFiles).map(writeVendorFiles)
-                );
-              })
-            );
-          },
-          [
-            {
-              extract: 'fetch',
-              path: 'isomorphic-fetch'
-            },
-            {
-              extract: 'fs',
-              path: 'fs-extra'
-            },
-            {
-              extract: 'path',
-              path: 'path'
-            },
-            {
-              extract: '{log}',
-              path: 'jsuti'
-            }
-          ],
-          pkgs,
-          appDependencies,
-          project,
-          createdPaths,
-          PATHS
+      const resolveAppDependencies = async pkg => {
+        const { version, dependencies, main } = appDependencies[pkg];
+        log(`<grey Fetching ${pkg}@${version}... />`).write();
+        const res = await fetch(
+          `https://t.staticblitz.com/v4/${pkg}@${version}`
         );
+        const { dirCache, vendorFiles } = await res.json();
+        const fullPkgName = `${pkg}@${version}`;
+        project.dirCache[fullPkgName] = dirCache[fullPkgName];
+        const writeVendorFiles = async file => {
+          const url = `https://unpkg.com${file}`;
+          const content = vendorFiles[file];
+          project.vendorFiles[url] = {
+            fullPath: url,
+            content
+          };
+          const dirName = path.dirname(file);
+          const folder = dirName.replace(fullPkgName, pkg);
+          const fileFolder = path.join(PATHS.DIR, 'node_modules', folder);
+          if (!createdPaths[folder]) {
+            createdPaths[folder] = fs.ensureDir(fileFolder);
+          }
+          await createdPaths[folder];
+          const filePath = path.join(fileFolder, file.replace(dirName, ''));
+          log(`<grey Writting ${filePath}... />`).write();
+          await fs.writeFile(filePath, content);
+          return filePath;
+        };
+        return Promise.all(Object.keys(vendorFiles).map(writeVendorFiles));
       };
       await Promise.all(
-        split(Object.keys(appDependencies)).map(resolveAppDependencies)
+        Object.keys(appDependencies).map(resolveAppDependencies)
       );
       if (args.dev) {
         await fs.move(PATHS.PACKAGE, PATHS.PACKAGE_BACKUP);
@@ -203,6 +158,7 @@ const runSteps = [
       ) {
         return false;
       }
+      const stdin = process.openStdin();
       log(
         '<yellow The package.json file is missing bellow peer dependencies:/>'
       );
